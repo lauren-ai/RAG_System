@@ -132,4 +132,160 @@ class TextProcessor:
 
 text_processor = TextProcessor()
 
+class TextProcessor_Faiss:
+    """文本处理器：负责文档加载、分段和向量索引构建"""
+    def __init__(self, embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        """
+        初始化文本处理器
+        
+        Args:
+            embedding_model_name: 嵌入模型名称
+        """
+        self.embedding_model_name = embedding_model_name
+        self.embeddings = None
+        self.vector_store = None
+        self.text_splitter = None
+        
+        # 初始化文本分割器
+        self.text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=50,
+            separators=["\n\n", "\n", ". ", "。", "! ", "！ ", "? ", "？ ", " ", ""]
+        )
+        
+        # 初始化嵌入模型
+        try:
+            self.embeddings = HuggingFaceEmbeddings(model_name=self.embedding_model_name)
+            logger.info(f"成功初始化嵌入模型: {self.embedding_model_name}")
+        except Exception as e:
+            logger.error(f"初始化嵌入模型失败: {str(e)}")
+            raise
+    
+    def process_documents(self, documents: List[Dict[str, Any]]) -> bool:
+        """
+        处理文档：分段并构建向量索引
+        
+        Args:
+            documents: 文档列表，每个文档包含"text"和"metadata"字段
+            
+        Returns:
+            是否处理成功
+        """
+        try:
+            # 1. 文本分段
+            docs = []
+            for doc in documents:
+                # 创建Document对象
+                document = Document(
+                    page_content=doc["text"],
+                    metadata=doc.get("metadata", {})
+                )
+                
+                # 分段处理
+                split_docs = self.text_splitter.split_documents([document])
+                docs.extend(split_docs)
+            
+            logger.info(f"文档分段完成，共获得 {len(docs)} 个文本块")
+            
+            # 2. 构建向量索引
+            self.vector_store = FAISS.from_documents(docs, self.embeddings)
+            logger.info("向量索引构建完成")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"处理文档时出错: {str(e)}")
+            return False
+    
+    def search_similar(self, query: str, k: int = 3) -> List[Dict[str, Any]]:
+        """
+        搜索相似文档
+        
+        Args:
+            query: 查询文本
+            k: 返回结果数量
+            
+        Returns:
+            相似文档列表
+        """
+        if not self.vector_store:
+            logger.warning("向量数据库未初始化")
+            return []
+        
+        try:
+            # 执行相似性搜索
+            docs = self.vector_store.similarity_search_with_score(query, k=k)
+            
+            # 格式化结果
+            results = []
+            for doc, score in docs:
+                results.append({
+                    "text": doc.page_content,
+                    "metadata": doc.metadata,
+                    "score": float(score)
+                })
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"搜索相似文档时出错: {str(e)}")
+            return []
+    
+    def save_vector_store(self, path: str) -> bool:
+        """
+        保存向量索引到磁盘
+        
+        Args:
+            path: 保存路径
+            
+        Returns:
+            是否保存成功
+        """
+        if not self.vector_store:
+            logger.warning("向量数据库未初始化，无法保存")
+            return False
+        
+        try:
+            ensure_directory(os.path.dirname(path))
+            self.vector_store.save_local(path)
+            logger.info(f"向量索引已保存到: {path}")
+            return True
+        except Exception as e:
+            logger.error(f"保存向量索引时出错: {str(e)}")
+            return False
+    
+    def load_vector_store(self, path: str) -> bool:
+        """
+        从磁盘加载向量索引
+        
+        Args:
+            path: 加载路径
+            
+        Returns:
+            是否加载成功
+        """
+        try:
+            if not os.path.exists(path):
+                logger.warning(f"向量索引文件不存在: {path}")
+                return False
+                
+            self.vector_store = FAISS.load_local(
+                path, 
+                self.embeddings,
+                allow_dangerous_deserialization=True
+            )
+            logger.info(f"向量索引已从 {path} 加载")
+            return True
+        except Exception as e:
+            logger.error(f"加载向量索引时出错: {str(e)}")
+            return False
+
+async def setup_environment():
+    logger.info("=== 配置环境 ===")
+    await asyncio.gather(
+        text_processor.embeddings.model.initialize(),
+        text_processor.embeddings.model.save_pretrained(r"models\BAAI\bge-small-zh-v1.5")
+    )
+    logger.info("环境配置完成")
+
 __all__ = ["TextProcessor", "text_processor"]

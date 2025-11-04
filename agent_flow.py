@@ -30,14 +30,14 @@ class RAGAgent:
             self.langsmith_client = None
             logger.info("LangSmith未启用，跳过初始化")
 
-        # api_key = os.getenv("LANGSMITH_API_KEY")
-        # if not api_key:
-        #     raise ValueError("请设置LANGSMITH_API_KEY环境变量")
+        api_key = os.getenv("LANGSMITH_API_KEY")
+        if not api_key:
+            raise ValueError("请设置LANGSMITH_API_KEY环境变量")
         
-        # self.langsmith_client = Client(
-        #     api_key=api_key
-        # )
-        # logger.info("LangSmith客户端初始化成功")
+        self.langsmith_client = Client(
+            api_key=api_key
+        )
+        logger.info("LangSmith客户端初始化成功")
         
     
         self.graph = self._build_graph()
@@ -46,6 +46,9 @@ class RAGAgent:
         logger.info("RAG Agent初始化完成")
     
     def _build_graph(self) -> StateGraph:
+        """
+        构建RAG Agent的LangGraph执行流程
+        """
         graph = StateGraph(AgentState)
         graph.add_node("retrieve", self._retrieve_documents)
         graph.add_node("generate", self._generate_answer)
